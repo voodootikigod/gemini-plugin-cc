@@ -1,0 +1,23 @@
+{
+  "name": "gemini-plugin-cc",
+  "owner": {
+    "name": "Chris Williams",
+    "email": "chris@voodootikigod.com"
+  },
+  "description": "Claude Code plugin marketplace for Gemini visual design review commands.",
+  "plugins": [
+    {
+      "name": "gemini",
+      "source": "./",
+      "description": "Visual design companion: Stitch DESIGN.md generation + Gemini-powered visual reviews of UI source and screenshots.",
+      "version": "0.2.0",
+      "author": {
+        "name": "Chris Williams"
+      },
+      "repository": "https://github.com/voodootikigod/gemini-plugin-cc",
+      "license": "MIT",
+      "category": "design",
+      "tags": ["visual-design", "design-md", "stitch", "gemini", "claude-code", "skills"]
+    }
+  ]
+}

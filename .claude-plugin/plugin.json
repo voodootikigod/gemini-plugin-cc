@@ -1,0 +1,11 @@
+{
+  "name": "gemini",
+  "version": "0.2.0",
+  "description": "Visual design companion for Claude Code. Uses Google Gemini to generate Stitch-format DESIGN.md and run visual design reviews against UI source and screenshots.",
+  "author": {
+    "name": "Chris Williams"
+  },
+  "repository": "https://github.com/voodootikigod/gemini-plugin-cc",
+  "license": "MIT",
+  "skills": ["./skills/gemini"]
+}
