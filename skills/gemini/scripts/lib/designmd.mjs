@@ -13,6 +13,7 @@
 // frontmatter is a constrained subset, not arbitrary YAML.
 
 import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 const ALLOWED_TOP_KEYS = new Set([
   "version", "name", "description", "colors", "typography", "rounded", "spacing", "components",
@@ -62,6 +63,9 @@ export function parseFrontmatter(yaml) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
     const indent = line.match(/^ */)[0].length;
     const trimmed = line.slice(indent);
+    if (trimmed.startsWith("- ") || trimmed === "-") {
+      throw new Error(`frontmatter line ${i + 1}: YAML lists are not supported in Stitch DESIGN.md frontmatter`);
+    }
     const colonIdx = trimmed.indexOf(":");
     if (colonIdx === -1) {
       throw new Error(`frontmatter line ${i + 1}: missing ':' in "${trimmed}"`);
@@ -281,7 +285,7 @@ const DESIGN_MD_CANDIDATES = ["DESIGN.md", "design.md", "docs/DESIGN.md", "docs/
 
 export function findDesignMd(cwd = process.cwd()) {
   for (const rel of DESIGN_MD_CANDIDATES) {
-    const full = `${cwd}/${rel}`;
+    const full = join(cwd, rel);
     if (existsSync(full)) return { path: rel, absolute: full };
   }
   return null;

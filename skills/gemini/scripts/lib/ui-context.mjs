@@ -204,16 +204,28 @@ export function buildUiContext({
   const explicit = collectExplicitScreenshots(cwd, screenshots);
   const conventional = collectImagesFromDirs(cwd, CONVENTIONAL_IMAGE_DIRS);
 
-  // Combine: explicit first, then conventional, dedupe by absolute path.
+  // Combine: explicit first (user intent wins), then conventional. Apply
+  // count + byte caps to the combined list and warn when images are dropped.
   const seen = new Set();
   const combined = [];
+  let totalBytes = 0;
+  let droppedForCount = 0;
+  let droppedForBytes = 0;
   for (const list of [explicit, conventional.picked]) {
     for (const img of list) {
       if (seen.has(img.absolute)) continue;
-      if (combined.length >= MAX_IMAGES) break;
       seen.add(img.absolute);
+      if (combined.length >= MAX_IMAGES) { droppedForCount++; continue; }
+      if (totalBytes + img.bytes > MAX_IMAGE_BYTES_TOTAL) { droppedForBytes++; continue; }
       combined.push(img);
+      totalBytes += img.bytes;
     }
+  }
+  if (droppedForCount > 0) {
+    process.stderr.write(`note: ${droppedForCount} image(s) skipped (cap: ${MAX_IMAGES} images per review).\n`);
+  }
+  if (droppedForBytes > 0) {
+    process.stderr.write(`note: ${droppedForBytes} image(s) skipped (cap: ${Math.round(MAX_IMAGE_BYTES_TOTAL / 1024)} KB total).\n`);
   }
 
   combined.forEach((img) => {
@@ -265,15 +277,6 @@ export function buildUiContext({
     label: combined.length
       ? `${combined.length} screenshot(s) + ${sourceFiles.length} source file(s)${designMd ? " + DESIGN.md" : ""}`
       : `UI source only (${sourceFiles.length} files)${designMd ? " + DESIGN.md" : ""}`,
-    body: sections.join("\n"),
-    images: combined,
-    sourceFiles,
-    designMd,
-  };
-}
-
-}
- : ""}`,
     body: sections.join("\n"),
     images: combined,
     sourceFiles,
