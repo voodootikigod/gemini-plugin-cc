@@ -18,6 +18,7 @@ import { runGemini } from "./lib/gemini.mjs";
 import { buildUiContext } from "./lib/ui-context.mjs";
 import { detectStitchCli, lintDesignMd } from "./lib/designmd-cli.mjs";
 import { findDesignMd, validateDesignMd } from "./lib/designmd.mjs";
+import { validateAgainstSchema, collectEnums } from "./lib/schema-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMAS_DIR = resolve(__dirname, "..", "schemas");
@@ -44,13 +45,36 @@ function emit(stdout) {
   process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
 }
 
+function loadSchema(schemaName) {
+  const schemaPath = resolve(SCHEMAS_DIR, `${schemaName}.schema.json`);
+  if (!existsSync(schemaPath)) {
+    process.stderr.write(`warning: schema ${schemaName} not found at ${schemaPath}; skipping JSON validation\n`);
+    return null;
+  }
+  try {
+    return JSON.parse(readFileSync(schemaPath, "utf8"));
+  } catch (e) {
+    process.stderr.write(`warning: schema ${schemaName} unreadable (${e.message}); skipping JSON validation\n`);
+    return null;
+  }
+}
+
 function jsonInstruction(schemaName) {
+  const schema = loadSchema(schemaName);
+  const enumLines = [];
+  if (schema) {
+    const enums = collectEnums(schema);
+    for (const [path, values] of Object.entries(enums)) {
+      enumLines.push(`- ${path}: one of [${values.join(", ")}]`);
+    }
+  }
   return [
     "",
     "<output_override>",
     `Ignore any Markdown formatting instructions above.`,
     `Return ONLY a single valid JSON object conforming to the ${schemaName} schema.`,
     `No prose, no code fences, no commentary outside the JSON.`,
+    ...(enumLines.length ? ["", "Allowed enum values (use exactly these strings):", ...enumLines] : []),
     "</output_override>",
   ].join("\n");
 }
@@ -63,15 +87,17 @@ function validateJson(text, schemaName) {
     try { writeFileSync(path, text); } catch {}
     throw new Error(`gemini returned non-JSON output. raw saved to ${path}. parse error: ${e.message}`);
   }
-  const schemaPath = resolve(SCHEMAS_DIR, `${schemaName}.schema.json`);
-  if (existsSync(schemaPath)) {
-    try {
-      const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
-      for (const k of schema.required || []) {
-        if (!(k in parsed)) throw new Error(`output missing required field: ${k}`);
-      }
-    } catch (e) {
-      if (e.message.startsWith("output missing")) throw e;
+  const schema = loadSchema(schemaName);
+  if (schema) {
+    const errs = validateAgainstSchema(parsed, schema);
+    if (errs.length) {
+      const path = `/tmp/gemini-bad-output-${Date.now()}.txt`;
+      try { writeFileSync(path, text); } catch {}
+      throw new Error(
+        `gemini output failed schema validation (${errs.length} error${errs.length === 1 ? "" : "s"}). raw saved to ${path}.\n  - ` +
+        errs.slice(0, 10).join("\n  - ") +
+        (errs.length > 10 ? `\n  - ... ${errs.length - 10} more` : ""),
+      );
     }
   }
   return JSON.stringify(parsed, null, 2);
@@ -97,8 +123,20 @@ function ctxOptions(args) {
   };
 }
 
+// Surface DESIGN.md validator output on stderr so the human sees it (the
+// LLM also receives the same content embedded in the review context).
+function reportDesignMdLint(ctx) {
+  if (!ctx.designMd?.validation) return;
+  const v = ctx.designMd.validation;
+  if (!v.errors.length && !v.warnings.length) return;
+  process.stderr.write(`\n[lint] DESIGN.md (${ctx.designMd.path}):\n`);
+  for (const e of v.errors) process.stderr.write(`  error:   ${e}\n`);
+  for (const w of v.warnings) process.stderr.write(`  warn:    ${w}\n`);
+}
+
 function cmdVisualDesignReview(args) {
   const ctx = buildUiContext(ctxOptions(args));
+  reportDesignMdLint(ctx);
   let body = ctx.body;
   if (ctx.designMd) body += externalLint(ctx.designMd.absolute);
   let prompt = renderPrompt("visual-design-review", {
@@ -110,6 +148,14 @@ function cmdVisualDesignReview(args) {
   let out = runGemini(prompt, { model: args.model, json: args.json, images: ctx.images });
   if (args.json) out = validateJson(out, "visual-design-review-output");
   emit(out);
+}
+
+// Strip a leading ```markdown / ```yaml / ``` fence wrapping if Gemini ignored
+// the "do not wrap" instruction. Only unwraps when the response begins with a
+// fence and ends with a matching one — otherwise returns the input unchanged.
+function unwrapCodeFence(text) {
+  const m = text.match(/^\s*```(?:markdown|md|yaml|yml|text|)?\r?\n([\s\S]*?)\r?\n```\s*$/);
+  return m ? m[1] : text;
 }
 
 function cmdVisualDesignDoc(args) {
@@ -124,15 +170,18 @@ function cmdVisualDesignDoc(args) {
     USER_FOCUS: focusText(args),
     REVIEW_INPUT: ctx.body,
   });
-  const out = runGemini(prompt, { model: args.model, json: false, images: ctx.images });
+  const raw = runGemini(prompt, { model: args.model, json: false, images: ctx.images });
+  const out = unwrapCodeFence(raw);
+  if (out !== raw) process.stderr.write("note: stripped wrapping code fence from generated DESIGN.md\n");
   mkdirSync(dirname(absOut), { recursive: true });
-  writeFileSync(absOut, out.endsWith("\n") ? out : `${out}\n`);
-  process.stdout.write(`wrote ${outPath} (${out.length} bytes)\n`);
+  const body = out.endsWith("\n") ? out : `${out}\n`;
+  writeFileSync(absOut, body);
+  process.stdout.write(`wrote ${outPath} (${Buffer.byteLength(body, "utf8")} bytes)\n`);
 
   // Self-validate and surface lint issues so the user sees them immediately.
   try {
     const v = validateDesignMd(out);
-    if (v.errors.length || v.warnings.length || v.contrast?.length) {
+    if (v.errors.length || v.warnings.length) {
       process.stderr.write("\n[lint] DESIGN.md self-check:\n");
       for (const e of v.errors) process.stderr.write(`  error:   ${e}\n`);
       for (const w of v.warnings) process.stderr.write(`  warn:    ${w}\n`);
@@ -142,6 +191,7 @@ function cmdVisualDesignDoc(args) {
 
 function cmdVisualAltDesign(args) {
   const ctx = buildUiContext(ctxOptions(args));
+  reportDesignMdLint(ctx);
   const prompt = renderPrompt("visual-alt-design", {
     TARGET_LABEL: ctx.label,
     USER_FOCUS: focusText(args),
@@ -152,6 +202,7 @@ function cmdVisualAltDesign(args) {
 
 function cmdVisualSecondOpinion(args) {
   const ctx = buildUiContext(ctxOptions(args));
+  reportDesignMdLint(ctx);
 
   process.stderr.write("→ pass 1/3: advocate\n");
   const advocate = runGemini(
@@ -273,7 +324,7 @@ function main() {
     else if (sub === "visual-design-doc") cmdVisualDesignDoc(args);
     else if (sub === "visual-alt-design") cmdVisualAltDesign(args);
     else if (sub === "visual-second-opinion") cmdVisualSecondOpinion(args);
-    else if (sub === "setup") cmdSetup(args);
+    else if (sub === "setup") cmdSetup();
   } catch (e) {
     fail(e.message);
   }
