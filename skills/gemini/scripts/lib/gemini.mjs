@@ -14,8 +14,8 @@ function buildPromptWithImages(prompt, images) {
   return [
     prompt.trimEnd(),
     "",
-    "## Attached screenshots",
-    "(each `@path` is loaded as a multimodal image input by the Gemini CLI)",
+    "## Attached files",
+    "(each `@path` is loaded as input by the Gemini CLI — images are read multimodally; text files are inlined)",
     "",
     refs,
     "",
@@ -50,11 +50,11 @@ function classifyTransientError(message) {
   return null;
 }
 
-function attemptGemini(finalPrompt, model, json, timeoutMs) {
+function attemptGemini(finalPrompt, model, json, timeoutMs, approvalMode) {
   const args = [
     "-p", finalPrompt,
     "-m", model,
-    "--approval-mode", "plan",
+    "--approval-mode", approvalMode,
     "-o", json ? "json" : "text",
   ];
   const r = spawnSync("gemini", args, {
@@ -80,6 +80,7 @@ export function runGemini(prompt, {
   json = false,
   images = [],
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  approvalMode = "plan",
 } = {}) {
   const finalPrompt = buildPromptWithImages(prompt, images);
   const modelChain = [model, "gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-2.5-pro"];
@@ -89,7 +90,7 @@ export function runGemini(prompt, {
   for (const m of uniqueModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        return attemptGemini(finalPrompt, m, json, timeoutMs);
+        return attemptGemini(finalPrompt, m, json, timeoutMs, approvalMode);
       } catch (e) {
         lastError = e;
         const kind = classifyTransientError(e.message);
