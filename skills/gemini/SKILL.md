@@ -1,11 +1,11 @@
 ---
 name: gemini
-description: Visual design companion. Generates Stitch-format DESIGN.md from UI source + screenshots, runs visual design reviews against brand fidelity, color/typography/spacing tokens, accessibility (WCAG), and component variants. Triggers on intents like "review the UI", "check brand consistency", "draft DESIGN.md", "propose alternative visual designs", "second opinion on this design". Not for code-architecture review.
+description: Gemini companion for Claude Code. Visual-design workflows (DESIGN.md generation, brand/token/WCAG reviews, alternative palettes, second opinions) plus a generic `ask` passthrough that routes arbitrary prompts to Google Gemini with optional file attachments and opt-in file writing. Triggers on intents like "review the UI", "check brand consistency", "draft DESIGN.md", "ask gemini to ...", "have gemini rewrite this".
 ---
 
-# Gemini Visual Design Companion
+# Gemini Companion
 
-Five workflows, one runtime. Pick the subcommand by user intent.
+Six workflows, one runtime. Pick the subcommand by user intent.
 
 | User intent | Subcommand | Default mode |
 |---|---|---|
@@ -13,9 +13,10 @@ Five workflows, one runtime. Pick the subcommand by user intent.
 | "draft DESIGN.md", "generate a design system file", "extract tokens" | `visual-design-doc` | foreground |
 | "alternative visual designs", "what other palettes / type systems would work" | `visual-alt-design` | background |
 | "second opinion", "advocate vs critic on the visuals" | `visual-second-opinion` | background (3 calls) |
+| "ask gemini ...", "have gemini rewrite ...", "use gemini to ..." (generic) | `ask` | foreground |
 | "is gemini set up", "check the plugin" | `setup` | foreground |
 
-**Do not trigger this skill for code-architecture review, API design critique, bug hunts, or line-level lint.** Those belong to a code-review skill.
+The five `visual-*` subcommands are visual-design-specific. The `ask` subcommand is the generic escape hatch — code questions, doc rewrites, multimodal reasoning, anything else Gemini can handle.
 
 ## What this skill does
 
@@ -56,7 +57,10 @@ node "${SKILL_DIR}/scripts/gemini-companion.mjs" <subcommand> [flags] [focus...]
 | `--json` | `visual-design-review` only — emit JSON conforming to `schemas/visual-design-review-output.schema.json` |
 | `--out <path>` / `--force` | `visual-design-doc` only — output path (default `DESIGN.md`) / overwrite |
 | `--no-design-prompt` | Skip the DESIGN.md preflight in `visual-design-review`, `visual-alt-design`, `visual-second-opinion` |
-| `<focus...>` | Trailing free-form text becomes user-focus / constraints in the prompt |
+| `--file <path>` | `ask` only — attach any file (text or image) to the Gemini call (repeatable) |
+| `--prompt-file <path>` | `ask` only — read prompt body from file instead of trailing args / stdin |
+| `--write` | `ask` only — switch approval-mode to `yolo` so Gemini may create / edit files (DESTRUCTIVE; opt-in) |
+| `<focus...>` | Trailing free-form text becomes user-focus / constraints in the prompt (or the prompt itself for `ask`) |
 
 ## DESIGN.md preflight
 
@@ -84,6 +88,14 @@ Reconstructs the current visual identity from `DESIGN.md` + screenshots + UI sou
 ### `visual-design-doc`
 Drafts a Stitch-format `DESIGN.md` from the inputs: YAML frontmatter (colors, typography, rounded, spacing, components) plus the eight canonical sections (Overview, Colors, Typography, Layout, Elevation & Depth, Shapes, Components, Do's and Don'ts). Default output `./DESIGN.md`. Refuses to overwrite without `--force`.
 
+### `ask`
+Generic Gemini passthrough. Routes a free-form prompt to `gemini -p` with optional file attachments — useful when the user explicitly wants Gemini (long-context summarization, friendlier tone rewrites, multimodal reasoning, file-writing) rather than the visual-design subcommands.
+
+- Prompt resolution: `--prompt-file <path>` > trailing positional text > stdin (errors if all empty).
+- Attachments: `--file <path>` (repeatable). `--screenshot` is also accepted and merged into the same list. Each file becomes an `@<absolute-path>` reference the Gemini CLI loads natively (images multimodally; text inlined). Note: gemini-cli restricts `@` reads to the current workspace — files outside CWD (e.g., `/tmp/...`) are silently dropped. Copy or symlink into the repo first.
+- Default approval-mode is `plan` — Gemini returns a plan, no file mutations. Pass `--write` to switch to `yolo` so Gemini may create / edit files in CWD; the script prints a `note: --write enabled ...` line to stderr when this happens.
+- Output: stdout verbatim, no DESIGN.md preflight, no UI scan, no schema validation.
+
 ### `setup`
 Verifies node >= 18, `gemini` on PATH, auth, git repo. Reports optional `design-md`/`stitch` CLI presence and `DESIGN.md` presence. Required checks fail the run; optional checks are informational.
 
@@ -97,4 +109,4 @@ Verifies node >= 18, `gemini` on PATH, auth, git repo. Reports optional `design-
 
 ## Related
 
-Slash commands (Claude Code plugin install): `/gemini:design`, `/gemini:visual-design-review`, `/gemini:visual-alt-design`, `/gemini:visual-second-opinion`, `/gemini:setup` — each maps to the corresponding subcommand with identical flags.
+Slash commands (Claude Code plugin install): `/gemini:design`, `/gemini:visual-design-review`, `/gemini:visual-alt-design`, `/gemini:visual-second-opinion`, `/gemini:ask`, `/gemini:setup` — each maps to the corresponding subcommand with identical flags.

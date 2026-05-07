@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Gemini visual-design companion. Subcommand dispatch:
+// Gemini companion. Subcommand dispatch:
 //   visual-design-review    — multi-axis visual design critique against DESIGN.md
 //   visual-design-doc       — generate Stitch-format DESIGN.md from UI source
 //   visual-alt-design       — propose 2–3 visual identity alternatives
 //   visual-second-opinion   — advocate + critic + synthesis on the visual design
+//   ask                     — generic Gemini passthrough: free-form prompt + optional file attachments
 //   setup                   — verify Node + gemini CLI + auth + git + optional design-md CLI
 //
 // All subcommands accept the same flag surface (see lib/args.mjs).
@@ -28,6 +29,7 @@ const SUBCOMMANDS = new Set([
   "visual-design-doc",
   "visual-alt-design",
   "visual-second-opinion",
+  "ask",
   "setup",
 ]);
 
@@ -251,6 +253,57 @@ function cmdVisualSecondOpinion(args) {
   ].join("\n"));
 }
 
+function readStdinSync() {
+  try {
+    if (process.stdin.isTTY) return "";
+    return readFileSync(0, "utf8");
+  } catch { return ""; }
+}
+
+function resolveAttachments(paths) {
+  const out = [];
+  for (const p of paths) {
+    const abs = resolve(process.cwd(), p);
+    if (!existsSync(abs)) {
+      throw new Error(`attachment not found: ${p}`);
+    }
+    out.push({ absolute: abs });
+  }
+  return out;
+}
+
+function cmdAsk(args) {
+  // Resolve prompt: --prompt-file > trailing focus > stdin
+  let prompt = "";
+  if (args.promptFile) {
+    const abs = resolve(process.cwd(), args.promptFile);
+    if (!existsSync(abs)) throw new Error(`--prompt-file not found: ${args.promptFile}`);
+    prompt = readFileSync(abs, "utf8");
+  } else if (args.focus.length) {
+    prompt = args.focus.join(" ");
+  } else {
+    prompt = readStdinSync();
+  }
+  prompt = prompt.trim();
+  if (!prompt) {
+    throw new Error("ask requires a prompt: pass it as trailing args, via --prompt-file <path>, or pipe to stdin");
+  }
+
+  const attachments = resolveAttachments([...args.file, ...args.screenshot]);
+  const approvalMode = args.write ? "yolo" : "plan";
+  if (args.write) {
+    process.stderr.write("note: --write enabled (approval-mode=yolo) — Gemini may create/modify files in this directory\n");
+  }
+
+  const out = runGemini(prompt, {
+    model: args.model,
+    json: args.json,
+    images: attachments,
+    approvalMode,
+  });
+  emit(out);
+}
+
 function cmdSetup() {
   const checks = [];
   const node = process.versions.node;
@@ -324,6 +377,7 @@ function main() {
     else if (sub === "visual-design-doc") cmdVisualDesignDoc(args);
     else if (sub === "visual-alt-design") cmdVisualAltDesign(args);
     else if (sub === "visual-second-opinion") cmdVisualSecondOpinion(args);
+    else if (sub === "ask") cmdAsk(args);
     else if (sub === "setup") cmdSetup();
   } catch (e) {
     fail(e.message);

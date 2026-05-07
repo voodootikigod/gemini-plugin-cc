@@ -1,9 +1,9 @@
 // Shared argv parser for gemini-companion subcommands.
 
-const REPEATABLE_VALUE_FLAGS = new Set(["--screenshot", "--include", "--exclude"]);
-const SINGLE_VALUE_FLAGS = new Set(["--model", "--out"]);
+const REPEATABLE_VALUE_FLAGS = new Set(["--screenshot", "--file", "--include", "--exclude"]);
+const SINGLE_VALUE_FLAGS = new Set(["--model", "--out", "--prompt-file"]);
 const BOOL_FLAGS = new Set([
-  "--wait", "--background", "--json", "--force", "--no-design-prompt",
+  "--wait", "--background", "--json", "--force", "--no-design-prompt", "--write",
 ]);
 
 function takeValue(name, raw, argv, i) {
@@ -29,6 +29,9 @@ export function parseArgs(argv) {
     out: null,
     force: false,
     screenshot: [],
+    file: [],
+    promptFile: null,
+    write: false,
     noDesignPrompt: false,
   };
 
@@ -41,18 +44,23 @@ export function parseArgs(argv) {
     if (a === "--json") { out.json = true; continue; }
     if (a === "--force") { out.force = true; continue; }
     if (a === "--no-design-prompt") { out.noDesignPrompt = true; continue; }
+    if (a === "--write") { out.write = true; continue; }
 
     // --flag=value form (single-value)
     if (a.startsWith("--model=")) { out.model = a.slice(8); continue; }
     if (a.startsWith("--out=")) { out.out = a.slice(6); continue; }
+    if (a.startsWith("--prompt-file=")) { out.promptFile = a.slice(14); continue; }
     if (a.startsWith("--screenshot=")) { out.screenshot.push(a.slice(13)); continue; }
+    if (a.startsWith("--file=")) { out.file.push(a.slice(7)); continue; }
     if (a.startsWith("--include=")) { out.include.push(a.slice(10)); continue; }
     if (a.startsWith("--exclude=")) { out.exclude.push(a.slice(10)); continue; }
 
     // --flag value form
     if (a === "--model") { out.model = takeValue("--model", a, argv, i); i++; continue; }
     if (a === "--out") { out.out = takeValue("--out", a, argv, i); i++; continue; }
+    if (a === "--prompt-file") { out.promptFile = takeValue("--prompt-file", a, argv, i); i++; continue; }
     if (a === "--screenshot") { out.screenshot.push(takeValue("--screenshot", a, argv, i)); i++; continue; }
+    if (a === "--file") { out.file.push(takeValue("--file", a, argv, i)); i++; continue; }
     if (a === "--include") { out.include.push(takeValue("--include", a, argv, i)); i++; continue; }
     if (a === "--exclude") { out.exclude.push(takeValue("--exclude", a, argv, i)); i++; continue; }
 
