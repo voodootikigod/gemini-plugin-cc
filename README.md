@@ -4,7 +4,7 @@ A visual design companion for AI coding agents. Uses Google Gemini to generate `
 
 Ships in two forms from the same source tree:
 
-- **Claude Code plugin**: five slash commands (`/gemini:design`, `/gemini:visual-design-review`, `/gemini:visual-alt-design`, `/gemini:visual-second-opinion`, `/gemini:setup`) with foreground/background execution, `AskUserQuestion` flows, and `${CLAUDE_PLUGIN_ROOT}` resolution.
+- **Claude Code plugin**: six slash commands (`/gemini:design`, `/gemini:visual-design-review`, `/gemini:visual-alt-design`, `/gemini:visual-second-opinion`, `/gemini:ask`, `/gemini:setup`) with foreground/background execution, `AskUserQuestion` flows, and `${CLAUDE_PLUGIN_ROOT}` resolution.
 - **[skills.sh](https://skills.sh) skill**: a self-contained `SKILL.md` invocable by natural language from any supported agent (Claude Code, Codex, Cursor, OpenCode, and others). The skill folder bundles its own scripts, prompts, and JSON schemas.
 
 Both share one UI-context bundler, one prompt renderer, and one headless `gemini -p` runtime (multimodal — screenshots are attached to the call), so output is identical regardless of how the review is triggered.
@@ -42,6 +42,7 @@ If the official `design-md` (or `stitch`) CLI is on `PATH`, this plugin detects 
 | `/gemini:visual-design-review` | Multi-axis visual critique with verdict (`ship` / `ship-with-followups` / `redesign-recommended`), severity-ordered findings, token references, and WCAG ratios. Optional JSON output. | background |
 | `/gemini:visual-alt-design` | Reconstruct the current visual identity, then propose 2–3 meaningfully different alternatives with token-level diffs and tradeoff comparison. | background |
 | `/gemini:visual-second-opinion` | Three Gemini calls: **advocate** (case to ship), **critic** (case to redesign), **synthesis** (verdict + cruxes + next action). | background (~60–120s) |
+| `/gemini:ask` | Generic Gemini passthrough. Free-form prompt with optional file attachments (`--file`, repeatable). Defaults to plan-mode (read-only); `--write` opts into file-writing mode. Not tied to visual design. | foreground or background (asks if unspecified) |
 | `/gemini:setup` | Verify Node, `gemini` CLI presence, auth, git, optional `design-md` CLI, and DESIGN.md presence. | foreground |
 
 `visual-design-review`, `visual-alt-design`, and `visual-second-opinion` run a one-time **DESIGN.md preflight**: if no `DESIGN.md` exists at one of the conventional paths, they ask once whether to generate one first. Pass `--no-design-prompt` to skip the question. When `DESIGN.md` *does* exist, it is auto-included (no question, no flag).
@@ -183,7 +184,10 @@ All subcommands share the same flag surface, parsed by `scripts/lib/args.mjs`:
 | `--out <path>` | `design` only. Output path (default `./DESIGN.md`) |
 | `--force` | `design` only. Overwrite an existing file |
 | `--no-design-prompt` | Skip the DESIGN.md preflight in `visual-design-review`, `visual-alt-design`, `visual-second-opinion` |
-| `<focus...>` | Trailing free-form text, passed to the prompt as user-focus / intent / constraints |
+| `--file <path>` | `ask` only. Attach any file (repeatable). Images = multimodal; text = inlined. Must live inside CWD (gemini-cli workspace scope). |
+| `--prompt-file <path>` | `ask` only. Read prompt body from a file instead of trailing positional text. |
+| `--write` | `ask` only. Switch from plan-mode (read-only) to `--approval-mode yolo` so Gemini can create/edit files in CWD. Destructive — confirmed via `AskUserQuestion` before running. |
+| `<focus...>` | Trailing free-form text, passed to the prompt as user-focus / intent / constraints (or as the prompt body for `ask`) |
 
 ### Model fallback
 
@@ -220,6 +224,11 @@ If the requested model returns 429 or "not found", the runtime walks a fallback 
 # Three-pass: advocate, critic, synthesis with verdict
 /gemini:visual-second-opinion
 /gemini:visual-second-opinion --background
+
+# Generic Gemini passthrough (not design-specific)
+/gemini:ask explain the trade-offs between PPR and ISR for our docs site
+/gemini:ask --prompt-file ./prompts/refactor.md --file src/auth.ts
+/gemini:ask rewrite this README to be friendlier --file README.md --write
 ```
 
 When invoked as a skills.sh skill from a non-Claude-Code agent, the same flag surface applies. The agent constructs the same `node .../gemini-companion.mjs <subcommand> [flags]` invocation under the hood. See `skills/gemini/SKILL.md` for the agent-facing brief.
@@ -284,6 +293,7 @@ gemini-plugin-cc/
 │   ├── visual-design-review.md
 │   ├── visual-alt-design.md
 │   ├── visual-second-opinion.md
+│   ├── ask.md                             # generic Gemini passthrough
 │   └── setup.md
 ├── skills/
 │   └── gemini/                            # self-contained skill (ships via skills.sh)
